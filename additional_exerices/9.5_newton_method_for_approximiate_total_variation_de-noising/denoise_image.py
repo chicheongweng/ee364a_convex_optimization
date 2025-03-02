@@ -56,18 +56,25 @@ def denoise_partition(xcor, epsilon, mu, alpha, beta, tol, max_iter):
     return x  
 
 # Newton's method with overlapping partitions for image denoising  
-def denoise_image(input_image_path, output_image_path, partition_width=256, overlap=32, epsilon=0.001, mu=50, alpha=0.01, beta=0.5, tol=1e-8, max_iter=100):  
+def denoise_image(input_image_path, output_image_path, partitions=4, epsilon=0.001, mu=50, alpha=0.01, beta=0.5, tol=1e-8, max_iter=100):
     # Load and flatten the noisy image  
     img_cor = np.array(Image.open(input_image_path).convert('L')) / 255.0  # Convert to grayscale and normalize  
     height, width = img_cor.shape  
+
+    # Calculate partition width and overlap based on the number of partitions
+    partition_width = width // partitions
+    overlap = max(partition_width // 8, 1)  # Set overlap as 1/8th of partition width, with a minimum of 1 pixel
 
     # Partition the image into overlapping vertical slices  
     denoised_image = np.zeros_like(img_cor)  
     weight_matrix = np.zeros_like(img_cor)  # To handle blending  
     start = 0  
+    iteration = 0
 
-    print(f"Starting Newton's method for image denoising with overlapping partitions...")  
-    while start < width:  
+    print(f"Starting Newton's method for image denoising with {partitions} partitions...")  
+    while start < width:
+        iteration = iteration + 1
+        print(f"Iteration {iteration}: Processing partition...")  # Print current iteration number
         end = min(start + partition_width, width)  
         if start > 0:  
             start_overlap = start - overlap  
@@ -116,4 +123,4 @@ def denoise_image(input_image_path, output_image_path, partition_width=256, over
     plt.show()  
 
 # Example usage  
-denoise_image('sf_with_noise.jpeg', 'sf_denoised.jpeg', partition_width=256, overlap=32)  
+denoise_image('sf_with_noise.jpeg', 'sf_denoised.jpeg', partitions=64)
