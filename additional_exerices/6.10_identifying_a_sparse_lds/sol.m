@@ -3,8 +3,8 @@ randn('state', 118);
 rand('state', 118);
 
 % Dimensions
-n = 8; % State dimension
-m = 4; % Input dimension
+n = 32; % State dimension
+m = 16; % Input dimension
 T = 100; % Number of time steps
 
 % Generate sparse random matrices A and B
@@ -105,6 +105,16 @@ if residual <= plausible_threshold
     disp('The solution meets the plausibility requirement.');
 else
     disp('The solution does NOT meet the plausibility requirement.');
+end
+
+% Compare the actual residual to the threshold
+disp('--- Comparison of Residual and Threshold ---');
+disp(['Actual Residual: ', num2str(residual)]);
+disp(['Threshold: ', num2str(plausible_threshold)]);
+if residual <= plausible_threshold
+    disp('The residual is within the threshold. The solution is plausible.');
+else
+    disp('The residual exceeds the threshold. The solution is NOT plausible.');
 end
 
 % Compare with true A and B
