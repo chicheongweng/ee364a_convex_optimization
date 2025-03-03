@@ -872,55 +872,61 @@ figure; plot(l,'b'); hold on;
 plot(u,'r'); hold off;
 % print('-depsc','spect_lu.eps');
 
-% Ensure S, u, and l are defined  
-if ~exist('S', 'var') || ~exist('u', 'var') || ~exist('l', 'var')  
-    error('Matrix S and vectors u and l must be defined in the workspace.');  
-end  
+function [q_min, q_max] = compute_bounds(S, l, u)
+    % Inputs:
+    % S: m x n spectrum matrix
+    % l: m-dimensional lower bound vector
+    % u: m-dimensional upper bound vector
+    % Outputs:
+    % q_min: n-dimensional vector of minimum values for q
+    % q_max: n-dimensional vector of maximum values for q
 
-% Initialize variables  
-q_min = zeros(n, 1); % To store the minimum bounds for q  
-q_max = zeros(n, 1); % To store the maximum bounds for q  
+    [m, n] = size(S);  % Dimensions of the spectrum matrix
+    q_min = zeros(n, 1);  % Initialize q_min
+    q_max = zeros(n, 1);  % Initialize q_max
 
-% Loop over each compound i to compute q_min(i) and q_max(i)  
-for i = 1:n  
-    % Objective vector for q_min (minimize q_i)  
-    c_min = zeros(n, 1);  
-    c_min(i) = 1; % Minimize q_i  
-    
-    % Objective vector for q_max (maximize q_i)  
-    c_max = zeros(n, 1);  
-    c_max(i) = -1; % Maximize q_i (negative for minimization in glpk)  
-    
-    % Constraints: l <= S * q <= u  
-    % This is equivalent to:  
-    %   S * q <= u  
-    %  -S * q <= -l  
-    A = [S; -S];  
-    b = [u; -l];  
-    
-    % Bounds for q: q >= 0  
-    lb = zeros(n, 1); % Lower bounds for q  
-    ub = []; % No upper bounds for q (infinity)  
-    
-    % Solve for q_min(i)  
-    [q_min_sol, fval_min, status_min] = glpk(c_min, A, b, lb, ub, repmat("U", size(b)), repmat("C", size(c_min)));  
-    if status_min == 5 % Check if the solution is feasible  
-        q_min(i) = fval_min;  
-    else  
-        q_min(i) = NaN; % Infeasible  
-    end  
-    
-    % Solve for q_max(i)  
-    [q_max_sol, fval_max, status_max] = glpk(c_max, A, b, lb, ub, repmat("U", size(b)), repmat("C", size(c_max)));  
-    if status_max == 5 % Check if the solution is feasible  
-        q_max(i) = -fval_max; % Negate because we minimized -q_i  
-    else  
-        q_max(i) = NaN; % Infeasible  
-    end  
-end  
+    % Constraints: l <= S*q <= u
+    A = [S; -S];  % Combine S and -S for inequality constraints
+    b = [u; -l];  % Combine u and -l for inequality constraints
 
-% Display results  
-disp('q_min:');  
-disp(q_min);  
-disp('q_max:');  
+    % Bounds for q: q >= 0
+    lb = zeros(n, 1);  % Lower bound for q (nonnegative)
+    ub = Inf(n, 1);  % No upper bound for q
+
+    % Loop over each compound i
+    for i = 1:n
+        % Objective for q_min: minimize q_i
+        c_min = zeros(n, 1);
+        c_min(i) = 1;  % Minimize q_i
+
+        % Solve for q_min(i) using glpk
+        [q, fval, exitflag] = glpk(c_min, A, b, lb, ub, repmat("U", size(b)), repmat("C", size(c_min)));
+        if exitflag == 0
+            q_min(i) = fval;  % Optimal value
+        else
+            q_min(i) = NaN;  % Infeasible
+        end
+
+        % Objective for q_max: maximize q_i (equivalent to minimizing -q_i)
+        c_max = zeros(n, 1);
+        c_max(i) = -1;  % Maximize q_i
+
+        % Solve for q_max(i) using glpk
+        [q, fval, exitflag] = glpk(c_max, A, b, lb, ub, repmat("U", size(b)), repmat("C", size(c_max)));
+        if exitflag == 0
+            q_max(i) = -fval;  % Negate because we minimized -q_i
+        else
+            q_max(i) = NaN;  % Infeasible
+        end
+    end
+end
+
+
+% Compute the bounds
+[q_min, q_max] = compute_bounds(S, l, u);
+
+% Display the results
+disp('q_min:');
+disp(q_min);
+disp('q_max:');
 disp(q_max);
