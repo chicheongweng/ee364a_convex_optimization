@@ -4,11 +4,11 @@ from scipy.linalg import solve_banded
 from pydub import AudioSegment
 
 # Parameters
-mu = 5  # Reduced regularization weight
-epsilon = 1e-2  # Increased epsilon for numerical stability
+mu = 1000  # Reduced regularization weight
+epsilon = 1e-8  # Increased epsilon for numerical stability
 alpha = 0.01
 beta = 0.5
-tolerance = 1e-3
+tolerance = 1e-8
 
 def gradient(x, x_cor, mu, epsilon):
     """
