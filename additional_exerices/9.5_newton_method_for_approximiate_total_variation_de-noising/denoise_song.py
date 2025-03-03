@@ -1,97 +1,127 @@
 import numpy as np
-from scipy.linalg import solve
+from scipy.linalg import solve_banded
 from pydub import AudioSegment
 
-# Gradient of the approximate total variation function
-def grad_phi_atv(x, epsilon):
+# Parameters
+mu = 50
+epsilon = 1e-3  # Small value for smooth approximation
+alpha = 0.01
+beta = 0.5
+tolerance = 1e-3
+
+def gradient(x, x_cor, mu, epsilon):
+    """
+    Compute the gradient of the objective function using the original TV formulation.
+    """
     n = len(x)
-    grad = np.zeros(n)
+    grad = 2 * (x - x_cor)  # Gradient of the fidelity term
     for i in range(n - 1):
         diff = x[i + 1] - x[i]
-        grad[i] -= diff / np.sqrt(epsilon**2 + diff**2)
-        grad[i + 1] += diff / np.sqrt(epsilon**2 + diff**2)
+        denom = np.sqrt(epsilon**2 + diff**2)
+        grad[i] -= mu * 2 * diff / denom
+        grad[i + 1] += mu * 2 * diff / denom
     return grad
 
-# Hessian of the approximate total variation function
-def hess_phi_atv(x, epsilon):
+def hessian(x, mu, epsilon):
+    """
+    Construct the tridiagonal Hessian matrix in banded form using the original TV formulation.
+    """
     n = len(x)
-    diagonals = [np.zeros(n), np.zeros(n - 1), np.zeros(n - 1)]
+    diag = 2 * np.ones(n)  # Diagonal entries from the fidelity term
+    off_diag = np.zeros(n - 1)  # Off-diagonal entries
+
     for i in range(n - 1):
         diff = x[i + 1] - x[i]
-        denom = (epsilon**2 + diff**2)**(3 / 2)
-        diagonals[0][i] += epsilon**2 / denom
-        diagonals[0][i + 1] += epsilon**2 / denom
-        diagonals[1][i] -= epsilon**2 / denom
-        diagonals[2][i] -= epsilon**2 / denom
-    return np.diag(diagonals[0]) + np.diag(diagonals[1], 1) + np.diag(diagonals[2], -1)
+        denom = (epsilon**2 + diff**2)**1.5
+        diag[i] += mu * (2 / np.sqrt(epsilon**2 + diff**2) - 2 * diff**2 / denom)
+        diag[i + 1] += mu * (2 / np.sqrt(epsilon**2 + diff**2) - 2 * diff**2 / denom)
+        off_diag[i] -= mu * 2 * diff / denom
 
-# Objective function
-def psi(x, xcor, mu, epsilon):
-    norm_term = np.sum((x - xcor)**2)
-    atv_term = np.sum(np.sqrt(epsilon**2 + (x[1:] - x[:-1])**2)) - epsilon * (len(x) - 1)
-    return norm_term + mu * atv_term
+    return diag, off_diag
 
-# Denoise a single partition
-def denoise_partition(xcor, epsilon, mu, alpha, beta, tol, max_iter):
-    x = np.zeros_like(xcor)
-    lambda2 = 1
-    iter_count = 0
-    while lambda2 / 2 > tol and iter_count < max_iter:
-        grad = 2 * (x - xcor) + mu * grad_phi_atv(x, epsilon)
-        hess = 2 * np.eye(len(x)) + mu * hess_phi_atv(x, epsilon)
-        delta_x = solve(hess, -grad)
+def newton_step(x, x_cor, mu, epsilon):
+    """
+    Compute the Newton step using the banded Hessian structure.
+    """
+    grad = gradient(x, x_cor, mu, epsilon)
+    diag, off_diag = hessian(x, mu, epsilon)
+    # Construct the banded matrix for solve_banded
+    ab = np.zeros((3, len(x)))
+    ab[1] = diag
+    ab[0, 1:] = off_diag
+    ab[2, :-1] = off_diag
+    delta_x = solve_banded((1, 1), ab, -grad)
+    return delta_x, grad
 
-        # Line search
-        t = 1
-        while psi(x + t * delta_x, xcor, mu, epsilon) > psi(x, xcor, mu, epsilon) + alpha * t * grad @ delta_x:
-            t *= beta
+def line_search(x, x_cor, mu, epsilon, delta_x):
+    """
+    Perform backtracking line search to find the step size.
+    """
+    t = 1
+    while True:
+        new_x = x + t * delta_x
+        psi_new = np.sum((new_x - x_cor)**2) + mu * np.sum(np.sqrt(epsilon**2 + (new_x[1:] - new_x[:-1])**2)) - mu * epsilon * (len(new_x) - 1)
+        psi_old = np.sum((x - x_cor)**2) + mu * np.sum(np.sqrt(epsilon**2 + (x[1:] - x[:-1])**2)) - mu * epsilon * (len(x) - 1)
+        if psi_new <= psi_old + alpha * t * np.dot(gradient(x, x_cor, mu, epsilon), delta_x):
+            break
+        t *= beta
+    return t
 
-        # Update
+def newton_method(x_cor, mu, epsilon, tolerance):
+    """
+    Perform Newton's method to minimize the objective function.
+    """
+    x = np.zeros_like(x_cor)
+    while True:
+        delta_x, grad = newton_step(x, x_cor, mu, epsilon)
+        lambda_sq = np.dot(delta_x, grad)
+        if lambda_sq / 2 <= tolerance:
+            break
+        t = line_search(x, x_cor, mu, epsilon, delta_x)
         x += t * delta_x
-        lambda2 = grad @ solve(hess, grad)
-        iter_count += 1
-
     return x
 
-# Newton's method for song denoising
-def denoise_song(input_song_path, output_song_path, partitions=4, epsilon=0.001, mu=50, alpha=0.01, beta=0.5, tol=1e-8, max_iter=100):
-    # Load the noisy song
-    song = AudioSegment.from_mp3(input_song_path)
-    song = song.set_channels(1)  # Convert to mono
-    samples = np.array(song.get_array_of_samples(), dtype=np.float32)
-    samples /= np.max(np.abs(samples))  # Normalize
+def denoise_partition(chunk, mu, epsilon, tolerance):
+    """
+    Denoise a single partition of the audio signal using Newton's method.
+    """
+    return newton_method(chunk, mu, epsilon, tolerance)
 
-    # Calculate partition length
-    partition_length = len(samples) // partitions
+def denoise_song(input_file, output_file, partitions, mu=50, epsilon=1e-3, tolerance=1e-3):
+    """
+    Denoise an audio file by partitioning it into chunks, denoising each chunk, and combining the results.
+    
+    Parameters:
+        input_file (str): Path to the noisy input audio file.
+        output_file (str): Path to save the denoised audio file.
+        partitions (int): Number of chunks to divide the audio file into.
+        mu (float): Regularization parameter for total variation.
+        epsilon (float): Small parameter for smooth approximation.
+        tolerance (float): Stopping criterion for Newton's method.
+    """
+    # Load the noisy audio file
+    audio = AudioSegment.from_file(input_file)
+    samples = np.array(audio.get_array_of_samples())
+    total_samples = len(samples)
+    chunk_size = total_samples // partitions
 
-    denoised_samples = np.zeros_like(samples)
-    start = 0
+    denoised_samples = []
 
-    print(f"Starting Newton's method for song denoising with {partitions} partitions...")
+    # Process each partition
     for i in range(partitions):
-        end = min(start + partition_length, len(samples))
-        partition = samples[start:end]
+        print(f"Processing chunk {i + 1} of {partitions}...")
+        start = i * chunk_size
+        end = (i + 1) * chunk_size if i < partitions - 1 else total_samples
+        chunk = samples[start:end]
+        denoised_chunk = denoise_partition(chunk, mu, epsilon, tolerance)
+        denoised_samples.append(denoised_chunk)
 
-        print(f"Processing partition {i + 1}/{partitions} from sample {start} to {end}...")
-        denoised_partition = denoise_partition(partition, epsilon, mu, alpha, beta, tol, max_iter)
-        denoised_samples[start:end] = denoised_partition
+    # Combine all denoised chunks
+    denoised_samples = np.concatenate(denoised_samples).astype(np.int16)
 
-        start = end
-
-    denoised_samples = np.clip(denoised_samples, -1, 1)  # Clip values to [-1, 1]
-
-    # Convert back to 16-bit PCM
-    denoised_samples = (denoised_samples * 32767).astype(np.int16)
-
-    # Save the denoised song
-    denoised_song = AudioSegment(
-        denoised_samples.tobytes(),
-        frame_rate=song.frame_rate,
-        sample_width=denoised_samples.dtype.itemsize,
-        channels=1
-    )
-    denoised_song.export(output_song_path, format="mp3", bitrate="192k")
-    print(f"Denoising complete. Denoised song saved as {output_song_path}.")
+    # Save the denoised audio file
+    denoised_audio = audio._spawn(denoised_samples.tobytes())
+    denoised_audio.export(output_file, format="mp3")
 
 # Example usage
-denoise_song('song_with_noise.mp3', 'song_denoised.mp3', partitions=16)
+denoise_song("song_with_noise.mp3", "song_denoised.mp3", partitions=10, mu=50, epsilon=1e-3, tolerance=1e-3)
