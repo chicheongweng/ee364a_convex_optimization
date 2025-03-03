@@ -1,3 +1,4 @@
+import os
 import numpy as np
 from scipy.linalg import solve_banded
 from pydub import AudioSegment
@@ -90,20 +91,22 @@ def denoise_partition(chunk, mu, epsilon, tolerance):
 def denoise_song(input_file, output_file, partitions, mu=50, epsilon=1e-3, tolerance=1e-3):
     """
     Denoise an audio file by partitioning it into chunks, denoising each chunk, and combining the results.
-    
-    Parameters:
-        input_file (str): Path to the noisy input audio file.
-        output_file (str): Path to save the denoised audio file.
-        partitions (int): Number of chunks to divide the audio file into.
-        mu (float): Regularization parameter for total variation.
-        epsilon (float): Small parameter for smooth approximation.
-        tolerance (float): Stopping criterion for Newton's method.
     """
     # Load the noisy audio file
     audio = AudioSegment.from_file(input_file)
     samples = np.array(audio.get_array_of_samples())
     total_samples = len(samples)
     chunk_size = total_samples // partitions
+
+    # Handle stereo audio (multiple channels)
+    channels = audio.channels
+    sample_width = audio.sample_width
+    frame_rate = audio.frame_rate
+
+    print(f"Input audio properties: frame_rate={frame_rate}, sample_width={sample_width}, channels={channels}")
+
+    if channels > 1:
+        samples = samples.reshape((-1, channels))
 
     denoised_samples = []
 
@@ -113,15 +116,41 @@ def denoise_song(input_file, output_file, partitions, mu=50, epsilon=1e-3, toler
         start = i * chunk_size
         end = (i + 1) * chunk_size if i < partitions - 1 else total_samples
         chunk = samples[start:end]
-        denoised_chunk = denoise_partition(chunk, mu, epsilon, tolerance)
+        if channels > 1:
+            denoised_chunk = np.array([denoise_partition(chunk[:, ch], mu, epsilon, tolerance) for ch in range(channels)]).T
+        else:
+            denoised_chunk = denoise_partition(chunk, mu, epsilon, tolerance)
         denoised_samples.append(denoised_chunk)
 
     # Combine all denoised chunks
-    denoised_samples = np.concatenate(denoised_samples).astype(np.int16)
+    denoised_samples = np.concatenate(denoised_samples, axis=0).astype(np.int16)
+
+    # Debugging: Check the denoised samples
+    print("Denoised samples (first 100):", denoised_samples[:100])
+    print("Max sample value:", np.max(denoised_samples))
+    print("Min sample value:", np.min(denoised_samples))
+
+    # Normalize the samples
+    max_val = np.max(np.abs(denoised_samples))
+    if max_val > 0:
+        denoised_samples = (denoised_samples / max_val * 32767).astype(np.int16)
+
+    # Flatten for mono audio
+    if channels == 1:
+        denoised_samples = denoised_samples.flatten()
 
     # Save the denoised audio file
-    denoised_audio = audio._spawn(denoised_samples.tobytes())
+    denoised_audio = AudioSegment(
+        denoised_samples.tobytes(),
+        frame_rate=frame_rate,
+        sample_width=sample_width,
+        channels=channels
+    )
     denoised_audio.export(output_file, format="mp3")
+
+    # Debugging: Check the output file
+    print("Exported file size:", os.path.getsize(output_file))
+    print("Denoising complete. Output saved to:", output_file)
 
 # Example usage
 denoise_song("song_with_noise.mp3", "song_denoised.mp3", partitions=10, mu=50, epsilon=1e-3, tolerance=1e-3)
