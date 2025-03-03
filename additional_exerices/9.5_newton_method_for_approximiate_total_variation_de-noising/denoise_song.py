@@ -4,8 +4,8 @@ from scipy.linalg import solve_banded
 from pydub import AudioSegment
 
 # Parameters
-mu = 50
-epsilon = 1e-3  # Small value for smooth approximation
+mu = 5  # Reduced regularization weight
+epsilon = 1e-2  # Increased epsilon for numerical stability
 alpha = 0.01
 beta = 0.5
 tolerance = 1e-3
@@ -18,7 +18,10 @@ def gradient(x, x_cor, mu, epsilon):
     grad = 2 * (x - x_cor)  # Gradient of the fidelity term
     for i in range(n - 1):
         diff = x[i + 1] - x[i]
+        diff = np.clip(diff, -1e6, 1e6)  # Clamp diff to avoid overflow
         denom = np.sqrt(epsilon**2 + diff**2)
+        denom = max(denom, 1e-10)  # Prevent division by zero
+        #print(f"diff[{i}]: {diff}, denom[{i}]: {denom}")  # Debugging output
         grad[i] -= mu * 2 * diff / denom
         grad[i + 1] += mu * 2 * diff / denom
     return grad
@@ -33,7 +36,9 @@ def hessian(x, mu, epsilon):
 
     for i in range(n - 1):
         diff = x[i + 1] - x[i]
+        diff = np.clip(diff, -1e6, 1e6)  # Clamp diff to avoid overflow
         denom = (epsilon**2 + diff**2)**1.5
+        denom = max(denom, 1e-10)  # Prevent division by zero
         diag[i] += mu * (2 / np.sqrt(epsilon**2 + diff**2) - 2 * diff**2 / denom)
         diag[i + 1] += mu * (2 / np.sqrt(epsilon**2 + diff**2) - 2 * diff**2 / denom)
         off_diag[i] -= mu * 2 * diff / denom
@@ -52,7 +57,23 @@ def newton_step(x, x_cor, mu, epsilon):
     ab[0, 1:] = off_diag
     ab[2, :-1] = off_diag
     delta_x = solve_banded((1, 1), ab, -grad)
+    print("Gradient (first 10):", grad[:10])  # Debugging gradient
+    print("Delta x (first 10):", delta_x[:10])  # Debugging delta_x
     return delta_x, grad
+
+def newton_method(x_cor, mu, epsilon, tolerance):
+    """
+    Perform Newton's method to minimize the objective function.
+    """
+    x = x_cor.copy()  # Initialize with the noisy signal
+    while True:
+        delta_x, grad = newton_step(x, x_cor, mu, epsilon)
+        lambda_sq = np.dot(delta_x, grad)
+        if lambda_sq / 2 <= tolerance:
+            break
+        t = line_search(x, x_cor, mu, epsilon, delta_x)
+        x += t * delta_x
+    return x
 
 def line_search(x, x_cor, mu, epsilon, delta_x):
     """
@@ -68,27 +89,13 @@ def line_search(x, x_cor, mu, epsilon, delta_x):
         t *= beta
     return t
 
-def newton_method(x_cor, mu, epsilon, tolerance):
-    """
-    Perform Newton's method to minimize the objective function.
-    """
-    x = np.zeros_like(x_cor)
-    while True:
-        delta_x, grad = newton_step(x, x_cor, mu, epsilon)
-        lambda_sq = np.dot(delta_x, grad)
-        if lambda_sq / 2 <= tolerance:
-            break
-        t = line_search(x, x_cor, mu, epsilon, delta_x)
-        x += t * delta_x
-    return x
-
 def denoise_partition(chunk, mu, epsilon, tolerance):
     """
     Denoise a single partition of the audio signal using Newton's method.
     """
     return newton_method(chunk, mu, epsilon, tolerance)
 
-def denoise_song(input_file, output_file, partitions, mu=50, epsilon=1e-3, tolerance=1e-3):
+def denoise_song(input_file, output_file, partitions, mu=5, epsilon=1e-2, tolerance=1e-3):
     """
     Denoise an audio file by partitioning it into chunks, denoising each chunk, and combining the results.
     """
@@ -153,4 +160,4 @@ def denoise_song(input_file, output_file, partitions, mu=50, epsilon=1e-3, toler
     print("Denoising complete. Output saved to:", output_file)
 
 # Example usage
-denoise_song("song_with_noise.mp3", "song_denoised.mp3", partitions=10, mu=50, epsilon=1e-3, tolerance=1e-3)
+denoise_song("song_with_noise.mp3", "song_denoised.mp3", partitions=10, mu=5, epsilon=1e-2, tolerance=1e-3)
