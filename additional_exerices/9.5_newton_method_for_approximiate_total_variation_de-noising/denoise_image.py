@@ -123,4 +123,4 @@ def denoise_image(input_image_path, output_image_path, partitions=4, epsilon=0.0
     plt.show()  
 
 # Example usage  
-denoise_image('sf_with_noise.jpeg', 'sf_denoised.jpeg', partitions=64)
+denoise_image('sf_with_noise.jpeg', 'sf_denoised.jpeg', partitions=16)
