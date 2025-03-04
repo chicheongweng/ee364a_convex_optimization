@@ -1,5 +1,5 @@
-import cvxpy as cp
 import numpy as np
+import cvxpy as cp
 
 # Projection function
 def Pi(y):
@@ -12,7 +12,7 @@ def Pi(y):
     return ranking
 
 # Data generation
-N = N_test = 2000
+N = N_test = 1000
 d = 20
 K = 10
 
@@ -65,6 +65,30 @@ total_entries = N_test * K  # Total number of entries in the test set
 accuracy = correct_predictions / total_entries  # Compute accuracy
 print(f"Accuracy: {accuracy * 100:.2f}%")
 
+# Detailed accuracy breakdown
+brackets = {"100% Match": 0, "25% Off": 0, "50% Off": 0, "100% Off": 0}
+
+for i in range(N_test):
+    # Compute the percentage of correct rankings for each test sample
+    matches = np.sum(pi_test[i] == pi_test_pred[i])
+    match_percentage = matches / K
+
+    # Categorize into brackets
+    if match_percentage == 1.0:
+        brackets["100% Match"] += 1
+    elif match_percentage >= 0.75:
+        brackets["25% Off"] += 1
+    elif match_percentage >= 0.50:
+        brackets["50% Off"] += 1
+    else:
+        brackets["100% Off"] += 1
+
+# Print detailed accuracy breakdown
+print("\nDetailed Accuracy Breakdown:")
+for category, count in brackets.items():
+    percentage = (count / N_test) * 100
+    print(f"{category}: {count} samples ({percentage:.2f}%)")
+
 # Inspect predictions
 print("\nSample of Predicted Scores (Y_test_pred):")
 print(Y_test_pred[:5])  # Print the first 5 predicted score vectors
@@ -72,3 +96,4 @@ print("\nSample of Predicted Rankings (pi_test_pred):")
 print(pi_test_pred[:5])  # Print the first 5 predicted rankings
 print("\nSample of True Rankings (pi_test):")
 print(pi_test[:5])  # Print the first 5 true rankings
+
